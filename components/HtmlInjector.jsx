@@ -7,7 +7,8 @@ export default function HtmlInjector({ src }) {
 
   useEffect(() => {
     mountedRef.current = true;
-    const controller = new AbortController();
+    // Avoid AbortController to prevent AbortError during React dev double-invoke
+    // Use mountedRef to ignore results after unmount
 
     // Setup runtime error overlay
     let overlay;
