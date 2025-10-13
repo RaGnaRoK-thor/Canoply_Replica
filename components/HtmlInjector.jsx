@@ -120,7 +120,7 @@ export default function HtmlInjector({ src }) {
 
     async function load() {
       try {
-        const res = await fetch(src, { signal: controller.signal });
+        const res = await fetch(src);
         if (!res.ok) return;
         const text = await res.text();
         if (!mountedRef.current) return;
