@@ -46,30 +46,47 @@ export default function HtmlInjector({ src }) {
         // Set body HTML (will not execute scripts)
         setHtml(doc.body.innerHTML || "");
 
-        // After DOM update, inject scripts in order
-        // Use setTimeout to ensure React flushed the innerHTML
-        setTimeout(() => {
+        // After DOM update, inject scripts in the original order and wait for external scripts to load
+        // Use a short timeout to allow React to flush innerHTML
+        setTimeout(async () => {
           const scripts = [...doc.querySelectorAll("script")];
-          scripts.forEach((s) => {
+
+          // Helper to avoid duplicates
+          const hasScript = (src) => !!document.querySelector(`script[src="${src}"]`);
+
+          // Load external scripts sequentially in the order they appear
+          for (const s of scripts) {
             const srcAttr = s.getAttribute("src");
             if (srcAttr) {
-              // avoid duplicate script tags
-              if (!document.querySelector(`script[src="${srcAttr}"]`)) {
+              if (hasScript(srcAttr)) {
+                // If script already present, wait for it to be ready if possible
+                await new Promise((r) => setTimeout(r, 10));
+                continue;
+              }
+
+              await new Promise((resolve) => {
                 const script = document.createElement("script");
                 script.src = srcAttr;
-                // preserve attributes
                 if (s.type) script.type = s.type;
                 script.async = false;
+                // Resolve on load or error to avoid blocking indefinitely
+                script.onload = () => resolve();
+                script.onerror = () => resolve();
                 document.body.appendChild(script);
-              }
-            } else {
-              // inline script
+              });
+            }
+          }
+
+          // After external scripts loaded, append inline scripts in order
+          for (const s of scripts) {
+            const srcAttr = s.getAttribute("src");
+            if (!srcAttr) {
               const inline = document.createElement("script");
               if (s.type) inline.type = s.type;
               inline.text = s.textContent || "";
               document.body.appendChild(inline);
             }
-          });
+          }
         }, 50);
       } catch (err) {
         // ignore abort or fetch errors
