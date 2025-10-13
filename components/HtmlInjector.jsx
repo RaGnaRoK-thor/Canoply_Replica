@@ -94,44 +94,82 @@ export default function HtmlInjector({ src }) {
         // Set body HTML (will not execute scripts)
         setHtml(doc.body.innerHTML || "");
 
-        // After DOM update, inject scripts in the original order and wait for external scripts to load
+        // After DOM update, inject scripts with vendor libraries prioritized and inline scripts deduplicated
         // Use a short timeout to allow React to flush innerHTML
         setTimeout(async () => {
           const scripts = [...doc.querySelectorAll("script")];
 
-          // Helper to avoid duplicates
+          const external = scripts.filter((s) => !!s.getAttribute("src"));
+          const inline = scripts.filter((s) => !s.getAttribute("src"));
+
           const hasScript = (src) => !!document.querySelector(`script[src="${src}"]`);
 
-          // Process scripts sequentially in document order
-          for (const s of scripts) {
-            const srcAttr = s.getAttribute("src");
-            if (srcAttr) {
-              if (hasScript(srcAttr)) {
-                // If script already present, wait a tick
-                await new Promise((r) => setTimeout(r, 10));
-                continue;
-              }
+          // Prioritize known vendor libs that many inline scripts depend on
+          const priorityPatterns = [
+            /jquery/i,
+            /gsap(\.min)?\.js|gsap\//i,
+            /ScrollTrigger/i,
+            /SplitText/i,
+            /InertiaPlugin/i,
+            /lenis/i,
+            /webflow/i,
+          ];
 
-              await new Promise((resolve) => {
-                const script = document.createElement("script");
-                script.src = srcAttr;
-                if (s.type) script.type = s.type;
-                script.async = false;
-                script.onload = () => resolve();
-                script.onerror = () => resolve();
-                document.body.appendChild(script);
-              });
-            } else {
-              // Inline: execute immediately in order
-              const inline = document.createElement("script");
-              if (s.type) inline.type = s.type;
-              inline.text = s.textContent || "";
-              document.body.appendChild(inline);
+          const prioritized = [];
+          const remaining = [...external];
+
+          priorityPatterns.forEach((pat) => {
+            for (let i = 0; i < remaining.length; i++) {
+              const s = remaining[i];
+              const src = s.getAttribute("src") || "";
+              if (pat.test(src)) {
+                prioritized.push(s);
+                remaining.splice(i, 1);
+                i--;
+              }
             }
+          });
+
+          const orderedExternals = [...prioritized, ...remaining];
+
+          // Load external scripts sequentially so dependencies are available
+          for (const s of orderedExternals) {
+            const srcAttr = s.getAttribute("src");
+            if (!srcAttr) continue;
+            if (hasScript(srcAttr)) {
+              // already injected elsewhere
+              await new Promise((r) => setTimeout(r, 10));
+              continue;
+            }
+
+            await new Promise((resolve) => {
+              const script = document.createElement("script");
+              script.src = srcAttr;
+              if (s.type) script.type = s.type;
+              script.async = false;
+              script.onload = () => resolve();
+              script.onerror = () => {
+                pushError(`Failed to load script: ${srcAttr}`);
+                resolve();
+              };
+              document.body.appendChild(script);
+            });
           }
 
-          // Some scripts listen for DOMContentLoaded; since we're injecting after initial load,
-          // re-dispatch the event so handlers execute.
+          // Inject inline scripts but avoid executing duplicates by hashing content
+          for (const s of inline) {
+            const content = s.textContent || "";
+            if (!content.trim()) continue;
+            const h = hashCode(content);
+            if (document.querySelector(`script[data-injected-hash="${h}"]`)) continue;
+            const inlineEl = document.createElement("script");
+            if (s.type) inlineEl.type = s.type;
+            inlineEl.setAttribute("data-injected-hash", h);
+            inlineEl.text = content;
+            document.body.appendChild(inlineEl);
+          }
+
+          // Re-dispatch DOMContentLoaded for handlers that expect it
           try {
             document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true, cancelable: true }));
           } catch (e) {
