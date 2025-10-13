@@ -256,7 +256,6 @@ export default function HtmlInjector({ src }) {
 
     return () => {
       mountedRef.current = false;
-      controller.abort();
       window.removeEventListener('error', onError);
     };
   }, [src]);
