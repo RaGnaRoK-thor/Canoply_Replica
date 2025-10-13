@@ -91,8 +91,11 @@ export default function HtmlInjector({ src }) {
           }
         });
 
-        // Set body HTML (will not execute scripts)
-        setHtml(doc.body.innerHTML || "");
+        // Remove script tags from doc.body to avoid automatic duplicates and set the body HTML
+        const scriptNodes = [...doc.querySelectorAll('script')];
+        scriptNodes.forEach((s) => s.parentNode && s.parentNode.removeChild(s));
+        const safeBody = doc.body.innerHTML || "";
+        setHtml(safeBody);
 
         // After DOM update, inject scripts with vendor libraries prioritized and inline scripts deduplicated
         // Use a short timeout to allow React to flush innerHTML
