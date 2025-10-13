@@ -54,12 +54,12 @@ export default function HtmlInjector({ src }) {
           // Helper to avoid duplicates
           const hasScript = (src) => !!document.querySelector(`script[src="${src}"]`);
 
-          // Load external scripts sequentially in the order they appear
+          // Process scripts sequentially in document order
           for (const s of scripts) {
             const srcAttr = s.getAttribute("src");
             if (srcAttr) {
               if (hasScript(srcAttr)) {
-                // If script already present, wait for it to be ready if possible
+                // If script already present, wait a tick
                 await new Promise((r) => setTimeout(r, 10));
                 continue;
               }
@@ -69,24 +69,29 @@ export default function HtmlInjector({ src }) {
                 script.src = srcAttr;
                 if (s.type) script.type = s.type;
                 script.async = false;
-                // Resolve on load or error to avoid blocking indefinitely
                 script.onload = () => resolve();
                 script.onerror = () => resolve();
                 document.body.appendChild(script);
               });
-            }
-          }
-
-          // After external scripts loaded, append inline scripts in order
-          for (const s of scripts) {
-            const srcAttr = s.getAttribute("src");
-            if (!srcAttr) {
+            } else {
+              // Inline: execute immediately in order
               const inline = document.createElement("script");
               if (s.type) inline.type = s.type;
               inline.text = s.textContent || "";
               document.body.appendChild(inline);
             }
           }
+
+          // Some scripts listen for DOMContentLoaded; since we're injecting after initial load,
+          // re-dispatch the event so handlers execute.
+          try {
+            document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true, cancelable: true }));
+          } catch (e) {
+            /* ignore */
+          }
+
+          // Also dispatch a custom event for any scripts expecting readiness
+          window.dispatchEvent(new CustomEvent("HtmlInjected", { detail: { src } }));
         }, 50);
       } catch (err) {
         // ignore abort or fetch errors
