@@ -44,8 +44,21 @@ export default function HtmlInjector({ src }) {
       list.prepend(el);
     }
 
+    function isAbortErrorPayload(e) {
+      try {
+        if (!e) return false;
+        if (e && typeof e === 'string' && e.toLowerCase().includes('abort')) return true;
+        if (e && e.message && typeof e.message === 'string' && e.message.toLowerCase().includes('abort')) return true;
+        if (e && e.name && e.name === 'AbortError') return true;
+        return false;
+      } catch (err) {
+        return false;
+      }
+    }
+
     function onError(e) {
       try {
+        if (isAbortErrorPayload(e)) return; // ignore expected aborts
         const msg = e && e.message ? e.message : String(e);
         pushError(msg);
         console.error('HtmlInjector captured error:', e);
@@ -54,8 +67,55 @@ export default function HtmlInjector({ src }) {
       }
     }
 
-    window.addEventListener('error', onError);
-    window.addEventListener('unhandledrejection', (ev) => onError(ev.reason));
+    window.addEventListener('error', (ev) => {
+      // Event object from window.error carries message in ev.message
+      if (isAbortErrorPayload(ev)) return;
+      onError(ev.error || ev.message || ev);
+    });
+
+    window.addEventListener('unhandledrejection', (ev) => {
+      if (isAbortErrorPayload(ev.reason)) return;
+      onError(ev.reason);
+    });
+
+    // Ensure minimal vendor stubs to avoid ReferenceErrors when CDN fails
+    function ensureVendorStubs() {
+      if (typeof window.gsap === 'undefined') {
+        window.gsap = {
+          timeline: () => ({ fromTo: () => {}, timeScale: () => {}, progress: () => {}, set: () => {}, add: () => {}, utils: { clamp: (a, b, c) => Math.max(a, Math.min(b, c)) } }),
+          registerPlugin: () => {},
+          ticker: { add: () => {}, lagSmoothing: () => {} },
+        };
+        pushError('Fallback: gsap stub injected');
+      }
+      if (typeof window.SplitText === 'undefined') {
+        window.SplitText = { create: () => ({ words: [] }) };
+        pushError('Fallback: SplitText stub injected');
+      }
+      if (typeof window.ScrollTrigger === 'undefined') {
+        window.ScrollTrigger = { create: () => ({}) };
+        pushError('Fallback: ScrollTrigger stub injected');
+      }
+      if (typeof window.Lenis === 'undefined' && typeof window.Lenis !== 'function') {
+        // Lenis isn't required to run; stub minimal
+        window.Lenis = function () { return { on: () => {}, raf: () => {} }; };
+        pushError('Fallback: Lenis stub injected');
+      }
+      if (typeof window.$ === 'undefined' && typeof window.jQuery === 'undefined') {
+        window.$ = window.jQuery = function () {
+          return {
+            each: () => {},
+            on: () => {},
+            find: () => ({ first: () => ({ height: () => 0, width: () => 0 }) }),
+            addClass: () => {},
+            removeClass: () => {},
+          };
+        };
+        pushError('Fallback: jQuery stub injected');
+      }
+    }
+
+    ensureVendorStubs();
 
     async function load() {
       try {
