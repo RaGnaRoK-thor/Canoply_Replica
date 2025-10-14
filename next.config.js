@@ -9,7 +9,6 @@ const nextConfig = {
       { source: '/book-now', destination: '/book-now.html' },
       { source: '/contact', destination: '/contact.html' },
       { source: '/gallery', destination: '/gallery.html' },
-      { source: '/location', destination: '/location.html' },
       { source: '/our-policies', destination: '/our-policies.html' },
       { source: '/reviews', destination: '/reviews.html' },
       { source: '/post/:slug', destination: '/post/:slug.html' },
